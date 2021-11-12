@@ -10,9 +10,10 @@
     ],
     "require": {
         "php": ">= 7.4",
-        "lcobucci/jwt": "^3.4",
+        "lcobucci/jwt": "^4.1",
         "league/oauth2-client": "^2.0",
-        "webmozart/assert": "^1.10"
+        "webmozart/assert": "^1.10",
+        "lcobucci/clock": "^2.1"
     },
     "require-dev": {
         "dg/bypass-finals": "^1.3",

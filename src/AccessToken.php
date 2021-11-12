@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace OpenIDConnectClient;
 
-use Lcobucci\JWT\Parser;
 use Lcobucci\JWT\Token;
 use League\OAuth2\Client\Token\AccessToken as LeagueAccessToken;
+use Webmozart\Assert\Assert;
 
 final class AccessToken extends LeagueAccessToken
 {
@@ -17,7 +17,8 @@ final class AccessToken extends LeagueAccessToken
         parent::__construct($options);
 
         if (isset($this->values['id_token'])) {
-            $this->idToken = (new Parser())->parse($this->values['id_token']);
+            Assert::isInstanceOf($this->values['id_token'], Token::class);
+            $this->idToken = $this->values['id_token'];
             unset($this->values['id_token']);
         }
     }

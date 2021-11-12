@@ -8,6 +8,7 @@ use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Psr7\Request;
 use InvalidArgumentException;
 use JsonException;
+use Lcobucci\JWT\Configuration;
 use Lcobucci\JWT\Signer;
 use Lcobucci\JWT\Signer\Key;
 use Lcobucci\JWT\Token;
@@ -15,11 +16,11 @@ use Lcobucci\JWT\Token\RegisteredClaims;
 use League\OAuth2\Client\Grant\AbstractGrant;
 use League\OAuth2\Client\Grant\GrantFactory;
 use League\OAuth2\Client\OptionProvider\PostAuthOptionProvider;
+use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
 use League\OAuth2\Client\Token\AccessToken;
 use League\OAuth2\Client\Tool\RequestFactory;
 use OpenIDConnectClient\Exception\InvalidTokenException;
 use OpenIDConnectClient\OpenIDConnectProvider;
-use OpenIDConnectClient\Validator\ValidatorChain;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -60,8 +61,8 @@ final class OpenIDConnectProviderTest extends TestCase
     /** @var MockObject&PostAuthOptionProvider */
     private MockObject $optionProvider;
 
-    /** @var MockObject&ValidatorChain */
-    private MockObject $validatorChain;
+    /** @var MockObject&Configuration */
+    private MockObject $configuration;
 
     protected function setUp(): void
     {
@@ -72,7 +73,7 @@ final class OpenIDConnectProviderTest extends TestCase
         $this->requestFactory = $this->createMock(RequestFactory::class);
         $this->httpClient = $this->createMock(HttpClient::class);
         $this->optionProvider = $this->createMock(PostAuthOptionProvider::class);
-        $this->validatorChain = $this->createMock(ValidatorChain::class);
+        $this->configuration = $this->createMock(Configuration::class);
 
         $this->provider = new OpenIDConnectProvider(
             [
@@ -88,12 +89,11 @@ final class OpenIDConnectProviderTest extends TestCase
                 'scopes' => ['scope_1', 'scope_2'],
             ],
             [
-                'signer' => $this->signer,
+                'jwtConfiguration' => $this->configuration,
                 'grantFactory' => $this->grantFactory,
                 'requestFactory' => $this->requestFactory,
                 'httpClient' => $this->httpClient,
                 'optionProvider' => $this->optionProvider,
-                'validatorChain' => $this->validatorChain,
             ],
         );
     }
@@ -104,6 +104,10 @@ final class OpenIDConnectProviderTest extends TestCase
     public function testConstructorWithoutSignerThrowsException(array $options, array $collaborators): void
     {
         $this->expectException(InvalidArgumentException::class);
+
+        if (isset($collaborators['jwtConfiguration']) && is_callable($collaborators['jwtConfiguration'])) {
+            $collaborators['jwtConfiguration'] = $collaborators['jwtConfiguration']();
+        }
 
         $this->provider = new OpenIDConnectProvider($options, $collaborators);
     }
@@ -187,7 +191,7 @@ final class OpenIDConnectProviderTest extends TestCase
             )
             ->willReturn(true);
 
-        $this->validatorChain
+        $this->configuration
             ->expects(self::once())
             ->method('validate')
             ->with(
@@ -230,7 +234,7 @@ final class OpenIDConnectProviderTest extends TestCase
             ->method('verify')
             ->willReturn(false);
 
-        $this->validatorChain
+        $this->configuration
             ->expects(self::never())
             ->method('validate');
 
@@ -241,6 +245,7 @@ final class OpenIDConnectProviderTest extends TestCase
 
     /**
      * @throws JsonException
+     * @throws IdentityProviderException
      */
     public function testGetAccessTokenThrowsExceptionForInvalidChain(): void
     {
@@ -261,7 +266,7 @@ final class OpenIDConnectProviderTest extends TestCase
             ->method('verify')
             ->willReturn(true);
 
-        $this->validatorChain
+        $this->configuration
             ->expects(self::once())
             ->method('validate')
             ->willReturn(false);
@@ -271,48 +276,15 @@ final class OpenIDConnectProviderTest extends TestCase
         $this->provider->getAccessToken($grant, $options);
     }
 
-    public function testDefaultValidatorChain(): void
-    {
-        $this->provider = new OpenIDConnectProvider(
-            [
-                'clientId' => 'some clientId',
-                'clientSecret' => 'some clientSecret',
-                'redirectUri' => 'some redirectUri',
-                'state' => 'some state',
-                'urlAuthorize' => 'url-auth',
-                'urlAccessToken' => 'url-accessToken',
-                'urlResourceOwnerDetails' => 'url-resourceOwnerDetails',
-                'publicKey' => ['some publicKey', 'some publicKey 2'],
-                'idTokenIssuer' => 'some idTokenIssuer',
-                'scopes' => ['scope_1', 'scope_2'],
-            ],
-            [
-                'signer' => $this->signer,
-                'grantFactory' => $this->grantFactory,
-                'requestFactory' => $this->requestFactory,
-                'httpClient' => $this->httpClient,
-                'optionProvider' => $this->optionProvider,
-            ],
-        );
-
-        $chain = $this->provider->getValidatorChain();
-
-        self::assertTrue($chain->hasValidator('azp'));
-        self::assertTrue($chain->hasValidator('nonce'));
-        self::assertTrue($chain->hasValidator(RegisteredClaims::AUDIENCE));
-        self::assertTrue($chain->hasValidator(RegisteredClaims::EXPIRATION_TIME));
-        self::assertTrue($chain->hasValidator(RegisteredClaims::ID));
-        self::assertTrue($chain->hasValidator(RegisteredClaims::ISSUED_AT));
-        self::assertTrue($chain->hasValidator(RegisteredClaims::ISSUER));
-        self::assertTrue($chain->hasValidator(RegisteredClaims::NOT_BEFORE));
-        self::assertTrue($chain->hasValidator(RegisteredClaims::SUBJECT));
-    }
-
     public function invalidConstructorArgumentsProvider(): iterable
     {
-        $signer = $this->createMock(Signer::class);
+        // The `BypassFinalExtension` is loaded after the providers. Hence, we postpone mocking a final class to when
+        // it is necessary.
+        $configurationResolver = function (): MockObject {
+            return $this->createMock(Configuration::class);
+        };
 
-        yield 'signer is missing' => [
+        yield 'configuration is missing' => [
             [
                 'urlAuthorize' => 'url-auth',
                 'urlAccessToken' => 'some urlAccessToken',
@@ -321,11 +293,11 @@ final class OpenIDConnectProviderTest extends TestCase
                 'idTokenIssuer' => 'some idTokenIssuer',
             ],
             [
-                //'signer' => $this->signer,
+                //'jwtConfiguration' => $configuration,
             ],
         ];
 
-        yield 'signer is wrong type' => [
+        yield 'configuration is wrong type' => [
             [
                 'urlAuthorize' => 'url-auth',
                 'urlAccessToken' => 'some urlAccessToken',
@@ -334,7 +306,7 @@ final class OpenIDConnectProviderTest extends TestCase
                 'idTokenIssuer' => 'some idTokenIssuer',
             ],
             [
-                'signer' => new stdClass(),
+                'jwtConfiguration' => new stdClass(),
             ],
         ];
 
@@ -347,7 +319,7 @@ final class OpenIDConnectProviderTest extends TestCase
                 'idTokenIssuer' => 'some idTokenIssuer',
             ],
             [
-                'signer' => $signer,
+                'jwtConfiguration' => $configurationResolver,
             ],
         ];
 
@@ -360,7 +332,7 @@ final class OpenIDConnectProviderTest extends TestCase
                 'idTokenIssuer' => 'some idTokenIssuer',
             ],
             [
-                'signer' => $signer,
+                'jwtConfiguration' => $configurationResolver,
             ],
         ];
 
@@ -373,7 +345,7 @@ final class OpenIDConnectProviderTest extends TestCase
                 'idTokenIssuer' => 'some idTokenIssuer',
             ],
             [
-                'signer' => $signer,
+                'jwtConfiguration' => $configurationResolver,
             ],
         ];
 
@@ -386,20 +358,20 @@ final class OpenIDConnectProviderTest extends TestCase
                 'idTokenIssuer' => 'some idTokenIssuer',
             ],
             [
-                'signer' => $signer,
+                'jwtConfiguration' => $configurationResolver,
             ],
         ];
 
         yield 'idTokenIssuer is missing' => [
             [
-                //'urlAuthorize' => 'url-auth',
+                'urlAuthorize' => 'url-auth',
                 'urlAccessToken' => 'some urlAccessToken',
                 'urlResourceOwnerDetails' => 'some urlResourceOwnerDetails',
                 'publicKey' => ['some publicKey', 'some publicKey 2'],
                 //'idTokenIssuer' => 'some idTokenIssuer',
             ],
             [
-                'signer' => $signer,
+                'jwtConfiguration' => $configurationResolver,
             ],
         ];
     }

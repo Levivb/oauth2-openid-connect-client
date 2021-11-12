@@ -34,20 +34,13 @@ if (empty($_GET['code'])) {
 
 // receive authorization response
 try {
-    $token = $provider->getAccessToken(
-        'authorization_code',
-        ['code' => $_GET['code']],
-    );
+    $token = $provider->getAccessToken('authorization_code', ['code' => $_GET['code']]);
 } catch (\OpenIDConnectClient\Exception\InvalidTokenException $e) {
-    $errors = $provider->getValidatorChain()->getMessages();
-    echo $e->getMessage();
-    var_dump($errors);
+    var_dump($e->getMessages());
 
     return;
 } catch (\Exception $e) {
     echo $e->getMessage();
-    $errors = $provider->getValidatorChain()->getMessages();
-    var_dump($errors);
 
     return;
 }
